@@ -131,17 +131,24 @@ const Editor = Module("editor", {
         return true;
     },
 
-    // cmd = y, d, c
+    // cmd = y, d, c, gu/gU as u/U, gs as s
     // motion = b, 0, gg, G, etc.
     executeCommandWithMotion: function (cmd, motion, count) {
         if (typeof count != "number" || count < 1)
             count = 1;
 
+        // section to handle dd,yy, gss etc.
         if (cmd == motion) {
             motion = "j";
             count--;
-        }
 
+        }
+        
+        // save current cursor position
+        if (cmd.match(/y/)) {
+            pos0 = Editor.getEditor().selectionStart;
+        }
+        
         modes.set(modes.VISUAL, modes.TEXTAREA);
 
         switch (motion) {
@@ -160,12 +167,37 @@ const Editor = Module("editor", {
         case "l":
             this.executeCommand("cmd_selectCharNext", count);
             break;
-        case "e":
         case "w":
-            this.executeCommand("cmd_selectWordNext", count);
+            pos1 = editor.findStartNextWord("w", count);
+            editor.moveToPosition(pos1, true, true);
+            break;
+        case "W":
+            pos1 = editor.findStartNextWord("W", count);
+            editor.moveToPosition(pos1, true, true);
             break;
         case "b":
-            this.executeCommand("cmd_selectWordPrevious", count);
+            pos1 = editor.findStartPrevWord("b", count);
+            editor.moveToPosition(pos1, false, true);
+            break;
+        case "B":
+            pos1 = editor.findStartPrevWord("B", count);
+            editor.moveToPosition(pos1, false, true);
+            break;
+        case "e":
+            pos1 = editor.findEndNextWord("e", count);
+            editor.moveToPosition(pos1, true, true);
+            break;
+        case "E":
+            pos1 = editor.findEndNextWord("E", count);
+            editor.moveToPosition(pos1, true, true);
+            break;
+        case "ge":
+            pos1 = editor.findEndPrevWord("ge", count)-1;
+            editor.moveToPosition(pos1, false, true);
+            break;
+        case "gE":
+            pos1 = editor.findEndPrevWord("gE", count)-1;
+            editor.moveToPosition(pos1, false, true);
             break;
         case "0":
         case "^":
@@ -202,7 +234,35 @@ const Editor = Module("editor", {
             break;
         case "y":
             this.executeCommand("cmd_copy", 1);
-            this.unselectText();
+            setTimeout(function(){ modes.set(modes.TEXTAREA); }, 150);
+            setTimeout(function(){ editor.moveToPosition(pos0, false, false); }, 100);
+            break;
+        case "u":
+            // is gu (make lowercase)
+            text = Editor.getEditor().value;
+            pos1 = Editor.getEditor().selectionStart;
+            pos2 = Editor.getEditor().selectionEnd;
+            Editor.getEditor().value = text.substring(0, pos1) +
+                text.substring(pos1, pos2).toLocaleLowerCase() +
+                text.substring(pos2);
+            modes.set(modes.TEXTAREA);
+            editor.moveToPosition(pos1, false, false);
+            break;
+        case "U":
+            // is gU (make uppercase)
+            text = Editor.getEditor().value;
+            pos1 = Editor.getEditor().selectionStart;
+            pos2 = Editor.getEditor().selectionEnd;
+            Editor.getEditor().value = text.substring(0, pos1) +
+                text.substring(pos1, pos2).toLocaleUpperCase() +
+                text.substring(pos2);
+            modes.set(modes.TEXTAREA);
+            editor.moveToPosition(pos1, false, false);
+            break;
+        case "s":
+            // is gs (substitute)
+            editor.executeCommand("cmd_paste");
+            modes.set(modes.TEXTAREA);
             break;
 
         default:
@@ -292,6 +352,182 @@ const Editor = Module("editor", {
         return -1;
     },
 
+    // returns the position of the start of the next word (vim equivalent: w,W)
+    findStartNextWord: function (kind, count) {
+        if (!Editor.getEditor())
+            return -1;
+
+        let text = Editor.getEditor().value;
+        if (!typeof count == "number" || count < 1)
+            count = 1;
+
+        if (kind == "w")
+        {
+            for (let i = Editor.getEditor().selectionEnd + 1; i < text.length; i++) {
+                let j = i - 1
+                if (text[i] == "\n")
+                    break;
+                if (text[j].match(/\s/) && text[i].match(/\S/) ||
+                    (text[j].match(/\W/) && text[i].match(/\w/)) ||
+                    (text[j].match(/\w/) && text[i].match(/[^A-Za-z0-9_]/) &&
+                    text[i].match(/\S/)))
+                    count--;
+                if (count == 0)
+                    return i;
+            }
+        }
+        else
+        {
+            for (let i = Editor.getEditor().selectionEnd + 1; i < text.length; i++) {
+                let j = i - 1
+                if (text[i] == "\n")
+                    break;
+                if (text[j].match(/\s/) && text[i].match(/\S/))
+                    count--;
+                if (count == 0)
+                    return i;
+            }
+        }
+
+        liberator.beep();
+        return -1;
+    },
+    
+    // returns the position of the start of the previous word (vim equivalent: b,B)
+    findStartPrevWord: function (kind, count) {
+        if (!Editor.getEditor())
+            return -1;
+
+        let text = Editor.getEditor().value;
+        if (!typeof count == "number" || count < 1)
+            count = 1;
+
+        if (kind == "b")
+        {
+            for (let i = Editor.getEditor().selectionStart - 1; i >= 0; i--) {
+                let j = i - 1
+                // enable move to the first sign in a row
+                if  (j == 0)
+                    return 0;
+                if (text[i] == "\n")
+                    break;
+                if (text[j].match(/\s/) && text[i].match(/\S/) ||
+                    (text[j].match(/\W/) && text[i].match(/\w/)) ||
+                    (text[j].match(/\w/) && text[i].match(/[^A-Za-z0-9_]/) &&
+                    text[i].match(/\S/)))
+                    count--;
+                if (count == 0)
+                    return i;
+            }
+        }
+        else
+        {
+            for (let i = Editor.getEditor().selectionStart - 1; i >= 0; i--) {
+                let j = i - 1
+                // enable move to the first sign in a row
+                if  (j == 0)
+                    return 0;
+                if (text[i] == "\n")
+                    break;
+                if (text[j].match(/\s/) && text[i].match(/\S/))
+                    count--;
+                if (count == 0)
+                    return i;
+            }
+        }
+
+        liberator.beep();
+        return -1;
+    },
+
+    // returns the position of the end of the next word (vim equivalent: e,E)
+    findEndNextWord: function (kind, count) {
+        if (!Editor.getEditor())
+            return -1;
+
+        let text = Editor.getEditor().value;
+        if (!typeof count == "number" || count < 1)
+            count = 1;
+
+        if (kind == "e")
+        {
+            for (let i = Editor.getEditor().selectionEnd + 1; i < text.length; i++) {
+                let j = i - 1
+                // enable move to the last sign in a row
+                if (i+1 == text.length)
+                    return i+1;
+                if (text[i] == "\n")
+                    break;
+                if (text[j].match(/\S/) && text[i].match(/\s/) ||
+                    (text[j].match(/\W/) && text[i].match(/\w/) &&
+                    text[j].match(/\S/)) || (text[j].match(/\w/) &&
+                    text[i].match(/[^A-Za-z0-9_]/) && text[i].match(/\S/)))
+                    count--;
+                if (count == 0)
+                    return i;
+            }
+        }
+        else
+        {
+            for (let i = Editor.getEditor().selectionEnd + 1; i < text.length; i++) {
+                let j = i - 1
+                // enable move to the last sign in a row
+                if (i+1 == text.length)
+                    return i+1;
+                if (text[i] == "\n")
+                    break;
+                if (text[j].match(/\S/) && text[i].match(/\s/))
+                    count--;
+                if (count == 0)
+                    return i;
+            }
+        }
+
+        liberator.beep();
+        return -1;
+    },
+    
+    // returns the position of the end of the previous word (vim equivalent: ge,gE)
+    findEndPrevWord: function (kind, count) {
+        if (!Editor.getEditor())
+            return -1;
+
+        let text = Editor.getEditor().value;
+        if (!typeof count == "number" || count < 1)
+            count = 1;
+
+        if (kind == "ge")
+        {
+            for (let i = Editor.getEditor().selectionStart - 1; i >= 0; i--) {
+                let j = i - 1
+                if (text[i] == "\n")
+                    break;
+                if (text[j].match(/\S/) && text[i].match(/\s/) ||
+                    (text[j].match(/\W/) && text[i].match(/\w/) &&
+                    text[j].match(/\S/)) || (text[j].match(/\w/) &&
+                    text[i].match(/[^A-Za-z0-9_]/) && text[i].match(/\S/)))
+                    count--;
+                if (count == 0)
+                    return i;
+            }
+        }
+        else
+        {
+            for (let i = Editor.getEditor().selectionStart - 1; i >= 0; i--) {
+                let j = i - 1
+                if (text[i] == "\n")
+                    break;
+                if (text[j].match(/\S/) && text[i].match(/\s/))
+                    count--;
+                if (count == 0)
+                    return i;
+            }
+        }
+
+        liberator.beep();
+        return -1;
+    },
+    
     editFileExternally: function (path) {
         // TODO: save return value in v:shell_error
         let args = commands.parseArgs(options.editor, [], [], "*", true);
@@ -627,8 +863,8 @@ const Editor = Module("editor", {
         addMovementMap(["j", "<Down>", "<Return>"],  true,  "lineMove", true,       "cmd_lineNext",     selectNextLine);
         addMovementMap(["h", "<Left>", "<BS>"],      true,  "characterMove", false, "cmd_charPrevious", "cmd_selectCharPrevious");
         addMovementMap(["l", "<Right>", "<Space>"],  true,  "characterMove", true,  "cmd_charNext",     "cmd_selectCharNext");
-        addMovementMap(["b", "B", "<C-Left>"],       true,  "wordMove", false,      "cmd_wordPrevious", "cmd_selectWordPrevious");
-        addMovementMap(["w", "W", "e", "<C-Right>"], true,  "wordMove", true,       "cmd_wordNext",     "cmd_selectWordNext");
+        // addMovementMap(["b", "<C-Left>"],       true,  "wordMove", false,      "cmd_wordPrevious", "cmd_selectWordPrevious");
+        // addMovementMap(["w", "e", "<C-Right>"], true,  "wordMove", true,       "cmd_wordNext",     "cmd_selectWordNext");
         addMovementMap(["<C-f>", "<PageDown>"],      true,  "pageMove", true,       "cmd_movePageDown", "cmd_selectNextPage");
         addMovementMap(["<C-b>", "<PageUp>"],        true,  "pageMove", false,      "cmd_movePageUp",   "cmd_selectPreviousPage");
         addMovementMap(["gg", "<C-Home>"],           false, "completeMove", false,  "cmd_moveTop",      "cmd_selectTop");
@@ -747,8 +983,18 @@ const Editor = Module("editor", {
             { count: true });
 
         mappings.add([modes.TEXTAREA],
+            ["Y"], "Copy the characters under the cursor until the end of the line",
+            function (count) {
+                editor.executeCommandWithMotion("y", "$", count);
+            },
+            { count: true });
+        
+        mappings.add([modes.TEXTAREA],
             ["D"], "Delete the characters under the cursor until the end of the line",
-            function () { editor.executeCommand("cmd_deleteToEndOfLine"); });
+            function (count) {
+                editor.executeCommandWithMotion("d", "$", count);
+            },
+            { count: true });
 
         mappings.add([modes.TEXTAREA],
             ["o"], "Open line below current",
@@ -777,10 +1023,49 @@ const Editor = Module("editor", {
             function (count) { editor.executeCommand("cmd_deleteCharForward", count); },
             { count: true });
 
+        mappings.add([modes.TEXTAREA],
+            ["gu"], "make all letters of the selection lowercase",
+            function (motion, count) {
+                editor.executeCommandWithMotion("u", motion, count);
+            },
+            { count: true, motion: true });
+        
+        mappings.add([modes.TEXTAREA],
+            ["gU"], "make all letters of the selection uppercase",
+            function (motion, count) {
+                editor.executeCommandWithMotion("U", motion, count);
+            },
+            { count: true, motion: true });
+        // the following is the same as above but necessary for bug solving
+        // necessary to enable gUU (make whole line uppercase)
+        mappings.add([modes.TEXTAREA],
+            ["U"], "bug solving purpose",
+            function (count) {
+                editor.executeCommand("cmd_undo", count);
+                liberator.mode = modes.TEXTAREA;
+            },
+            { count: true });
+        
+        mappings.add([modes.TEXTAREA],
+            ["gs"], "substitute the selection with the clipboard content",
+            function (motion, count) {
+                editor.executeCommandWithMotion("s", motion, count);
+            },
+            { count: true, motion: true });
+        
+
         // visual mode
-        mappings.add([modes.CARET, modes.TEXTAREA],
+        mappings.add([modes.CARET],
             ["v"], "Start visual mode",
             function (count) {
+                modes.set(modes.VISUAL, liberator.mode);
+                editor.setVisualMode("");
+            });
+
+        mappings.add([modes.TEXTAREA],
+            ["v"], "Start visual mode",
+            function (count) {
+                pos0 = Editor.getEditor().selectionStart;
                 modes.set(modes.VISUAL, liberator.mode);
                 editor.setVisualMode("");
             });
@@ -824,10 +1109,44 @@ const Editor = Module("editor", {
                 if (modes.extended & modes.TEXTAREA) {
                     editor.executeCommand("cmd_copy");
                     modes.set(modes.TEXTAREA);
-                }
+                    editor.moveToPosition(pos0, false, false);
+            }
                 else {
                     util.copyToClipboard(buffer.getCurrentWord(), true);
                 }
+            });
+
+        mappings.add([modes.VISUAL],
+            ["gs"], "substitute selection with clipboard content",
+            function () {
+                editor.executeCommand("cmd_paste");
+                modes.set(modes.TEXTAREA);
+            });
+
+        mappings.add([modes.VISUAL],
+            ["gu"], "make selection lowercase",
+            function () {
+                text = Editor.getEditor().value;
+                pos1 = Editor.getEditor().selectionStart;
+                pos2 = Editor.getEditor().selectionEnd;
+                Editor.getEditor().value = text.substring(0, pos1) +
+                    text.substring(pos1, pos2).toLocaleLowerCase() +
+                    text.substring(pos2);
+                modes.set(modes.TEXTAREA);
+                editor.moveToPosition(pos1, false, false);
+            });
+
+        mappings.add([modes.VISUAL],
+            ["gU"], "make selection uppercase",
+            function () {
+                text = Editor.getEditor().value;
+                pos1 = Editor.getEditor().selectionStart;
+                pos2 = Editor.getEditor().selectionEnd;
+                Editor.getEditor().value = text.substring(0, pos1) +
+                    text.substring(pos1, pos2).toLocaleUpperCase() +
+                    text.substring(pos2);
+                modes.set(modes.TEXTAREA);
+                editor.moveToPosition(pos1, false, false);
             });
 
         mappings.add([modes.VISUAL, modes.TEXTAREA],
@@ -839,20 +1158,144 @@ const Editor = Module("editor", {
                 while (count--)
                     editor.executeCommand("cmd_paste");
                 liberator.mode = modes.TEXTAREA;
-            });
+            },
+            { count: true });
 
-        // finding characters
+        // Enable word motions (b,B,w,W,i{w,W},a{w,W})
+        mappings.add([modes.TEXTAREA, modes.VISUAL],
+            ["b"], "go to the start of the previous word",
+            function (count) {
+                let pos = editor.findStartPrevWord("b", count);
+                if (pos >= 0)
+                    editor.moveToPosition(pos, false, liberator.mode == modes.VISUAL);
+            },
+            { count: true });
+
+        mappings.add([modes.TEXTAREA, modes.VISUAL],
+            ["B"], "go to the start of the previous WORD",
+            function (count) {
+                let pos = editor.findStartPrevWord("B", count);
+                if (pos >= 0)
+                    editor.moveToPosition(pos, false, liberator.mode == modes.VISUAL);
+            },
+            { count: true });
+
+        mappings.add([modes.TEXTAREA, modes.VISUAL],
+            ["w"], "go to the start of the next word",
+            function (count) {
+                let pos = editor.findStartNextWord("w", count);
+                if (pos >= 0)
+                    editor.moveToPosition(pos, true, liberator.mode == modes.VISUAL);
+            },
+            { count: true });
+
+        mappings.add([modes.TEXTAREA, modes.VISUAL],
+            ["W"], "go to the start of the next WORD",
+            function (count) {
+                let pos = editor.findStartNextWord("W", count);
+                if (pos >= 0)
+                    editor.moveToPosition(pos, true, liberator.mode == modes.VISUAL);
+            },
+            { count: true });
+
+        mappings.add([modes.VISUAL],
+            ["iw"], "select the word under the cursor (i: without whitespace)",
+            function (count) {
+                let pos0 = editor.findStartPrevWord("b", 1);
+                editor.moveToPosition(pos0, true, false);
+                let pos1 = editor.findEndNextWord("e", count);
+                editor.moveToPosition(pos1, true, true);
+            },
+            { count: true });
+
+        mappings.add([modes.VISUAL],
+            ["iW"], "select the WORD under the cursor (i: without whitespace)",
+            function (count) {
+                let pos0 = editor.findStartPrevWord("B", 1);
+                editor.moveToPosition(pos0, true, false);
+                let pos1 = editor.findEndNextWord("E", count);
+                editor.moveToPosition(pos1, true, true);
+            },
+            { count: true });
+
+        mappings.add([modes.VISUAL],
+            ["aw"], "select the word under the cursor (a: with whitespace)",
+            function (count) {
+                let pos0 = editor.findStartPrevWord("b", 1);
+                editor.moveToPosition(pos0, true, false);
+                let pos1 = editor.findStartNextWord("w", count);
+                editor.moveToPosition(pos1, true, true);
+            },
+            { count: true });
+
+        mappings.add([modes.VISUAL],
+            ["aW"], "select the word under the cursor (a: with whitespace)",
+            function (count) {
+                let pos0 = editor.findStartPrevWord("B", 1);
+                editor.moveToPosition(pos0, true, false);
+                let pos1 = editor.findStartNextWord("W", count);
+                editor.moveToPosition(pos1, true, true);
+            },
+            { count: true });
+
+        mappings.add([modes.TEXTAREA, modes.VISUAL],
+            ["e"], "go to the end of the next word",
+            function (count) {
+                let pos = editor.findEndNextWord("e", count);
+                if (pos >= 0)
+                    editor.moveToPosition(pos, true, liberator.mode == modes.VISUAL);
+            },
+            { count: true });
+
+        mappings.add([modes.TEXTAREA, modes.VISUAL],
+            ["E"], "go to the end of the next WORD",
+            function (count) {
+                let pos = editor.findEndNextWord("E", count);
+                if (pos >= 0)
+                    editor.moveToPosition(pos, true, liberator.mode == modes.VISUAL);
+            },
+            { count: true });
+
+        
+        mappings.add([modes.TEXTAREA, modes.VISUAL],
+            ["ge"], "go to the end of the previous word",
+            function (count) {
+                let pos = editor.findEndPrevWord("ge", count);
+                if (pos >= 0)
+                    editor.moveToPosition(pos, false, liberator.mode == modes.VISUAL);
+            },
+            { count: true });
+
+        mappings.add([modes.TEXTAREA, modes.VISUAL],
+            ["gE"], "go to the end of the previous WORD",
+            function (count) {
+                let pos = editor.findEndPrevWord("gE", count);
+                if (pos >= 0)
+                    editor.moveToPosition(pos, false, liberator.mode == modes.VISUAL);
+            },
+            { count: true });
+        
+        // finding characters ({fFtT}<space> is necessary to enabled finding <space> too)
         mappings.add([modes.TEXTAREA, modes.VISUAL],
             ["f"], "Move to a character on the current line after the cursor",
             function (count, arg) {
                 let pos = editor.findCharForward(arg, count);
                 if (pos >= 0)
-                    editor.moveToPosition(pos - 1, true, liberator.mode == modes.VISUAL);
+                    editor.moveToPosition(pos, true, liberator.mode == modes.VISUAL);
             },
             { arg: true, count: true });
 
         mappings.add([modes.TEXTAREA, modes.VISUAL],
-            ["F"], "Move to a character on the current line before the cursor",
+            ["f<Space>"], "Move to a <space> on the current line after the cursor",
+            function (count) {
+                let pos = editor.findCharForward(" ", count);
+                if (pos >= 0)
+                    editor.moveToPosition(pos, true, liberator.mode == modes.VISUAL);
+            },
+            { count: true });
+
+        mappings.add([modes.TEXTAREA, modes.VISUAL],
+            ["F"], "Move to a charater on the current line before the cursor",
             function (count, arg) {
                 let pos = editor.findCharBackward(arg, count);
                 if (pos >= 0)
@@ -861,13 +1304,31 @@ const Editor = Module("editor", {
             { arg: true, count: true });
 
         mappings.add([modes.TEXTAREA, modes.VISUAL],
+            ["F<Space>"], "Move to a <space> on the current line before the cursor",
+            function (count) {
+                let pos = editor.findCharBackward(" ", count);
+                if (pos >= 0)
+                    editor.moveToPosition(pos, false, liberator.mode == modes.VISUAL);
+            },
+            { count: true });
+
+        mappings.add([modes.TEXTAREA, modes.VISUAL],
             ["t"], "Move before a character on the current line",
             function (count, arg) {
                 let pos = editor.findCharForward(arg, count);
                 if (pos >= 0)
-                    editor.moveToPosition(pos - 2, true, liberator.mode == modes.VISUAL);
+                    editor.moveToPosition(pos - 1, true, liberator.mode == modes.VISUAL);
             },
             { arg: true, count: true });
+
+        mappings.add([modes.TEXTAREA, modes.VISUAL],
+            ["t<Space>"], "Move before a <space> on the current line",
+            function (count) {
+                let pos = editor.findCharForward(" ", count);
+                if (pos >= 0)
+                    editor.moveToPosition(pos - 1, true, liberator.mode == modes.VISUAL);
+            },
+            { count: true });
 
         mappings.add([modes.TEXTAREA, modes.VISUAL],
             ["T"], "Move before a character on the current line, backwards",
@@ -877,6 +1338,15 @@ const Editor = Module("editor", {
                     editor.moveToPosition(pos + 1, false, liberator.mode == modes.VISUAL);
             },
             { arg: true, count: true });
+
+        mappings.add([modes.TEXTAREA, modes.VISUAL],
+            ["T<Space>"], "Move before a <space> on the current line, backwards",
+            function (count) {
+                let pos = editor.findCharBackward(" ", count);
+                if (pos >= 0)
+                    editor.moveToPosition(pos + 1, false, liberator.mode == modes.VISUAL);
+            },
+            { count: true });
 
             // textarea and visual mode
         mappings.add([modes.TEXTAREA, modes.VISUAL],
